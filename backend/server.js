@@ -29,39 +29,33 @@ async function streamLLM(prompt, sendChunk) {
   }
 }
 
-// ✅ Streaming route (SSE)
+// ❌ No more SSE streaming — we’ll wait for full response
 app.post("/chat", async (req, res) => {
   const userPrompt = req.body.prompt;
-  
-  // Set SSE headers
-  res.setHeader("Content-Type", "text/event-stream");
-  res.setHeader("Cache-Control", "no-cache");
-  res.setHeader("Connection", "keep-alive");
 
   try {
-    await streamLLM(userPrompt+"Instructions(Dont mention at response):Add indendations like spaces etc... dont denote ** ** and other stuffs like italic etc.. but give the answer as neet alignment and indentations, Dont send the instruction answer to response", (chunk) => {
-      res.write(`data: ${chunk}\n\n`);
-    });
+    let fullResponse = "";
 
-    res.write("data: [END]\n\n");
-    res.end();
+    // Collect all chunks instead of sending immediately
+    await streamLLM(
+      userPrompt + "Instructions(Dont mention at response): Add indentations like spaces etc... don't denote ** ** or italics, but align the text neatly. Don't send the instruction itself.",
+      (chunk) => {
+        fullResponse += chunk; // Append each chunk to the full response
+      }
+    );
+
+    // ✅ Once all chunks received, send to frontend as single response
+    res.status(200).json({
+      success: true,
+      message: fullResponse.trim()
+    });
 
   } catch (err) {
     console.error("Ollama Error:", err);
-    res.write(`data: ERROR: ${err.message}\n\n`);
-    res.end();
-  }
-});
-
-app.post("/", async (req, res) => {
-  try {
-    const { prompt } = req.body;  // 👈 get prompt from frontend POST body
-    
-    const responseText = await getResponse(prompt+"Give the response as html");
-    res.json({ response: responseText });
-  } catch (err) {
-    console.error("Ollama error:", err);
-    res.status(500).send("Error: " + err.message);
+    res.status(500).json({
+      success: false,
+      error: err.message
+    });
   }
 });
 
